@@ -1,0 +1,17 @@
+# Test configuration that returns RESULT: DONE immediately
+
+[general]
+max_retries = 3
+max_iterations = 10
+timeout = 30
+
+[prompts]
+starting = "Starting prompt for iteration {{iteration_count}}"
+continuation = "Continue prompt with: {{next_prompt}}"
+review = "Review: {{dev_response}}"
+next_action = "Next: {{dev_response}}"
+
+[agents]
+dev = "echo '{{prompt}}' && echo 'Dev work done'"
+review = "echo '{{prompt}}' && echo '' && echo 'RESULT: DONE'"
+next_action = "echo '{{prompt}}'"

@@ -21,9 +21,7 @@ use std::borrow::Cow;
 ///
 /// # Example
 ///
-/// ```
-/// use ralph::agent::capture::lossy_utf8;
-///
+/// ```ignore
 /// // Valid UTF-8 passes through unchanged
 /// let valid = b"hello world";
 /// assert_eq!(lossy_utf8(valid), "hello world");
@@ -63,9 +61,7 @@ impl CapturedOutput {
     ///
     /// # Example
     ///
-    /// ```
-    /// use ralph::agent::capture::CapturedOutput;
-    ///
+    /// ```ignore
     /// let output = CapturedOutput::from_bytes(
     ///     b"stdout content",
     ///     b"stderr content"

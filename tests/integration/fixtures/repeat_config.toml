@@ -1,0 +1,17 @@
+# Test configuration that always returns RESULT: REPEAT to test max retries
+
+[general]
+max_retries = 2
+max_iterations = 10
+timeout = 30
+
+[prompts]
+starting = "Starting prompt"
+continuation = "Continue: {{next_prompt}}"
+review = "Review: {{dev_response}}"
+next_action = "Next: {{dev_response}}"
+
+[agents]
+dev = "echo '{{prompt}}'"
+review = "echo '{{prompt}}' && echo 'RESULT: REPEAT'"
+next_action = "echo '{{prompt}}'"

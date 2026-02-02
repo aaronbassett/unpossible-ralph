@@ -1,0 +1,79 @@
+# ralph.toml - Example configuration for AI agent loop orchestration
+#
+# This file demonstrates all available configuration options for ralph.
+# Copy to ralph.toml and customize for your workflow.
+
+[general]
+# Maximum consecutive failures before exiting with code 2 (required)
+max_retries = 3
+
+# Maximum total iterations (0 = unlimited, optional)
+max_iterations = 0
+
+# Default timeout in seconds for all agents (optional, default: 1800)
+timeout = 1800
+
+[prompts]
+# Used for iteration 1 only
+starting = """
+You are a development assistant. Complete the following task:
+
+{{iteration_count}} iterations completed so far.
+"""
+
+# Used for iteration 2+ (after RESULT: CONTINUE)
+continuation = """
+Continue working on the task.
+
+## Instructions from previous iteration
+{{next_prompt}}
+
+Progress: Iteration {{iteration_count}}, Retries: {{retry_count}}
+"""
+
+# Sent to review agent after dev agent completes
+review = """
+Review the following work output and determine the next action.
+
+## Development Agent Output
+{{dev_response}}
+
+## Development Agent Errors
+{{dev_errors}}
+
+Respond with exactly ONE of these on its own line:
+- RESULT: CONTINUE - if work is complete and ready for next task
+- RESULT: REPEAT - if work needs to be redone
+- RESULT: DONE - if all work is complete and loop should exit
+"""
+
+# Sent to next-action agent after RESULT: CONTINUE
+next_action = """
+Based on the completed work, generate instructions for the next task.
+
+## Development Agent Output
+{{dev_response}}
+
+## Review Agent Output
+{{review_response}}
+
+## Review Agent Errors
+{{review_errors}}
+
+Write clear instructions for what to do next.
+"""
+
+[agents]
+# Development agent - simple format (uses global timeout)
+dev = "claude -p '{{prompt}}'"
+
+# Review agent - extended format with per-agent timeout (10 minutes)
+review = { command = "claude -p '{{prompt}}'", timeout = 600 }
+
+# Next-action agent - simple format
+next_action = "claude -p '{{prompt}}'"
+
+# Alternative: use different models or tools
+# dev = "aider --message '{{prompt}}'"
+# review = { command = "gpt4 '{{prompt}}'", timeout = 300 }
+# next_action = "openai chat -m gpt-4o-mini '{{prompt}}'"
