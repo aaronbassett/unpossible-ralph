@@ -10,9 +10,11 @@
 //! - [`agent`] - Agent execution with timeout handling and output capture
 //! - [`config`] - Configuration loading and validation
 //! - [`r#loop`] - Core orchestration loop state machine and executor
+//! - [`result`] - RESULT signal parsing from review agent output
 //! - [`template`] - Variable interpolation for prompt templates
 
 pub mod agent;
 pub mod config;
 pub mod r#loop;
+pub mod result;
 pub mod template;
