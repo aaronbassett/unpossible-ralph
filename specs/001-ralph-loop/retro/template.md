@@ -1,0 +1,24 @@
+# Phase {N} Retrospective: {Phase Name}
+
+**Date**: {date}
+**Status**: In Progress
+
+---
+
+## What Worked Well
+<!-- Effective patterns, tools, approaches -->
+
+## What Didn't Work
+<!-- Problems, issues, limitations encountered -->
+
+## Workarounds & Solutions
+<!-- Bug fixes, non-obvious solutions, clever workarounds -->
+
+## Packages & Dependencies
+<!-- Useful packages discovered, packages to avoid, version issues -->
+
+## Patterns & Code
+<!-- Reusable patterns, helpful code snippets, architectural insights -->
+
+## For Next Time
+<!-- Improvement suggestions, lessons learned, things to try differently -->

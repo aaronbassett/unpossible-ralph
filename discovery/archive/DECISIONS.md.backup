@@ -1,0 +1,601 @@
+# Decision Log: ralph-loop
+
+*Chronological record of all decisions made during discovery.*
+
+---
+
+[Decision entries will be added as decisions are made]
+
+## D1: Use TOML for configuration — 2026-02-02
+
+**Context**: Need to choose config format for prompt templates and settings
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: TOML - consistent with Rust ecosystem conventions
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D2: Unified agent configuration for review and next-action — 2026-02-02
+
+**Context**: Need to determine how the next-action model is configured vs review agent
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Same configuration mechanism - both review and next-action generation use the same configurable agent pool
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D3: Task list via prompts, not orchestrator — 2026-02-02
+
+**Context**: Need to determine how task list is provided to the orchestrator
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Task list management is developer-defined via their prompt templates, not an orchestrator concern. The orchestrator just runs iterations.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D4: Exit with error on max retry exceeded — 2026-02-02
+
+**Context**: Need to determine behavior when max retries is exceeded
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Exit with error code when max retries exceeded - fail fast, let developer intervene
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D5: TOML configuration format — 2026-02-02
+
+**Context**: Need to determine configuration file format for prompts and settings
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Use TOML - consistent with Rust ecosystem conventions
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D6: Unified agent configuration — 2026-02-02
+
+**Context**: Need to determine how to configure the next-action model vs review agent
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Next-action model uses same configuration mechanism as review agent - unified agent config
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D7: Task list via prompts — 2026-02-02
+
+**Context**: Need to determine how task list is provided to orchestrator
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Task list is developer-defined via prompt templates - orchestrator is task-agnostic
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D8: Config file location — 2026-02-02
+
+**Context**: Need to determine where ralph looks for configuration
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Look for ralph.toml in current directory, or accept --config CLI flag to specify path
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D9: Environment variables for API credentials — 2026-02-02
+
+**Context**: Need to determine how API keys are provided
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: API credentials via environment variables only - never stored in config file
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D10: Command-based agent configuration — 2026-02-02
+
+**Context**: Need to determine how to configure different agents (dev, review, next-action)
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Agents configured as shell commands with variable substitution (e.g., command = "claude -p '{{prompt}}'"). No provider abstraction - just specify the command to run.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D11: Configurable development agent — 2026-02-02
+
+**Context**: Is the development agent always claude -p or configurable?
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Development agent is configurable - specified as a command like review/next-action agents
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D12: No automatic response truncation — 2026-02-02
+
+**Context**: Should the orchestrator truncate very long agent responses?
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: No automatic truncation - pass through full responses. Users handle truncation in their prompt templates if needed.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D13: Separate stdout/stderr capture — 2026-02-02
+
+**Context**: How to handle stdout vs stderr from agent commands
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Capture separately as {{dev_response}} (stdout) and {{dev_errors}} (stderr). Review/next-action prompt templates must include at least one of these variables.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 1, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D14: Non-zero exit treated as failure — 2026-02-02
+
+**Context**: What happens when dev agent command exits with non-zero code
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Treat as automatic failure - increment retry count, but still proceed to review agent. Allows reviewer to assess what went wrong.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 1, Story 5
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D15: 30 minute default timeout — 2026-02-02
+
+**Context**: Should there be a configurable timeout for agent execution
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Yes, configurable timeout with 30 minute (1800 seconds) default. Can be overridden in config.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 1, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D16: Silent capture with summary — 2026-02-02
+
+**Context**: Should output be streamed to terminal or captured silently
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Capture silently, show summary after each agent completes. No real-time streaming.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 1
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D17: Loop termination: DONE signal + max iterations — 2026-02-02
+
+**Context**: How does the loop terminate normally
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Combination: reviewer can output RESULT: DONE to signal completion. Config also has max_iterations as safety limit (0 = unlimited). Both max_retries (consecutive failures) and max_iterations (total runs) are configurable.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 1, Story 3, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D18: Capture review_errors for consistency — 2026-02-02
+
+**Context**: Should review agent stderr be captured separately
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Yes, capture {{review_errors}} (stderr) separately, same as dev agent for consistency
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 2, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D19: Per-agent timeout configuration — 2026-02-02
+
+**Context**: Should each agent have its own timeout or share global
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Per-agent timeout config. Each agent can have its own timeout, falling back to global default.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 2, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D20: Review agent failure exits immediately — 2026-02-02
+
+**Context**: What happens if review agent fails (non-zero exit or timeout)
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Exit immediately with error - review agent is critical infrastructure, failure indicates setup problem not dev work problem
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 2
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D21: Case-insensitive RESULT parsing — 2026-02-02
+
+**Context**: Should RESULT: be case-sensitive
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Case-insensitive parsing - RESULT: DONE, result: done, Result: Done all valid. More forgiving of different LLM outputs.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 3
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D22: Missing RESULT treated as REPEAT — 2026-02-02
+
+**Context**: What happens if no valid RESULT is found in review output
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Treat missing RESULT as REPEAT (conservative). Assumes review couldn't confirm success, so retry. Log warning to user.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 3
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D23: Use last RESULT on multiple matches — 2026-02-02
+
+**Context**: What if multiple RESULT lines appear in review output
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Use last occurrence - agent's final answer is typically at the end of response
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 3
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D24: Exit code 2 for max retries exceeded — 2026-02-02
+
+**Context**: What exit code when max_retries exceeded
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Exit code 2 specifically indicates max retries exceeded. Distinct from exit code 1 (other errors).
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 5
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D25: Negative max_retries is validation error — 2026-02-02
+
+**Context**: How to handle negative max_retries in config
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Config validation error - fail fast if max_retries < 0. Clear contract, no silent behavior changes.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 5, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D26: Next-action output replaces {{next_prompt}} variable — 2026-02-02
+
+**Context**: How is next-action agent output used
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Output replaces {{next_prompt}} variable in a wrapper template, rather than being used directly. Allows consistent framing around generated prompts.
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 4, Story 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D27: Next-action agent failure exits immediately — 2026-02-02
+
+**Context**: What happens if next-action agent fails
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Exit with error - next-action agent is critical infrastructure like review agent
+
+**Rationale**: [Rationale not provided]
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: Story 4
+
+**Related Questions**: [Questions not specified]
+
+---
