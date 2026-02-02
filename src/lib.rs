@@ -7,6 +7,12 @@
 //!
 //! # Modules
 //!
+//! - [`agent`] - Agent execution with timeout handling and output capture
 //! - [`config`] - Configuration loading and validation
+//! - [`r#loop`] - Core orchestration loop state machine and executor
+//! - [`template`] - Variable interpolation for prompt templates
 
+pub mod agent;
 pub mod config;
+pub mod r#loop;
+pub mod template;
