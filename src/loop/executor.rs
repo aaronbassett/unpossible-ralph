@@ -304,6 +304,267 @@ impl LoopExecutor {
     pub fn runner_for_agent(&self, agent: &str) -> AgentRunner {
         AgentRunner::new(self.agent_timeout(agent))
     }
+
+    /// Gets the appropriate prompt template for the current iteration.
+    ///
+    /// Returns the `starting` template for iteration 1, or the `continuation`
+    /// template for iteration 2+.
+    #[must_use]
+    pub fn get_dev_prompt_template(&self) -> &str {
+        if self.is_first_iteration() {
+            &self.config.prompts.starting
+        } else {
+            &self.config.prompts.continuation
+        }
+    }
+
+    /// Gets the review prompt template.
+    #[must_use]
+    pub fn get_review_prompt_template(&self) -> &str {
+        &self.config.prompts.review
+    }
+
+    /// Gets the next-action prompt template.
+    #[must_use]
+    pub fn get_next_action_prompt_template(&self) -> &str {
+        &self.config.prompts.next_action
+    }
+
+    /// Gets the command for a specific agent.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent name ("dev", "review", or "next_action")
+    #[must_use]
+    pub fn get_agent_command(&self, agent: &str) -> &str {
+        match agent {
+            "dev" => self.config.agents.dev.command(),
+            "review" => self.config.agents.review.command(),
+            "next_action" | "next-action" => self.config.agents.next_action.command(),
+            _ => "",
+        }
+    }
+
+    /// Runs the dev agent with the current context.
+    ///
+    /// This method:
+    /// 1. Builds a template context with current state variables
+    /// 2. Renders the appropriate prompt template (starting or continuation)
+    /// 3. Renders the agent command with the prompt
+    /// 4. Executes the command via shell
+    /// 5. Displays a summary (FR17)
+    ///
+    /// # Returns
+    ///
+    /// Returns the `AgentResult` on success, or an error message on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Template rendering fails (undefined variable)
+    /// - Agent execution fails (spawn error, timeout)
+    pub async fn run_dev_agent(&self) -> Result<crate::agent::AgentResult, String> {
+        // Build context with state variables
+        let mut ctx = self.build_context();
+
+        // Get and render the prompt template
+        let prompt_template = self.get_dev_prompt_template();
+        let rendered_prompt = ctx
+            .render(prompt_template)
+            .map_err(|e| format!("Failed to render dev prompt: {e}"))?;
+
+        // Add rendered prompt to context for command template
+        ctx.set("prompt", rendered_prompt);
+
+        // Get and render the command template
+        let command_template = self.get_agent_command("dev");
+        let command = ctx
+            .render(command_template)
+            .map_err(|e| format!("Failed to render dev command: {e}"))?;
+
+        // Run the agent
+        let runner = self.runner_for_agent("dev");
+        let result = runner
+            .run(&command)
+            .await
+            .map_err(|e| format!("Dev agent error: {e}"))?;
+
+        // Display summary
+        let summary = super::IterationSummary::new(
+            self.iteration(),
+            "dev",
+            result.exit_code,
+            result.stdout.len(),
+            result.stderr.len(),
+        );
+        self.display_summary(&summary);
+
+        Ok(result)
+    }
+
+    /// Runs the review agent with dev agent output.
+    ///
+    /// This method:
+    /// 1. Builds a template context with state and dev output
+    /// 2. Renders the review prompt template
+    /// 3. Renders the agent command with the prompt
+    /// 4. Executes the command via shell
+    /// 5. Displays a summary (FR17)
+    ///
+    /// # Arguments
+    ///
+    /// * `dev_response` - The stdout from the dev agent
+    /// * `dev_errors` - The stderr from the dev agent
+    ///
+    /// # Returns
+    ///
+    /// Returns the `AgentResult` on success, or an error message on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Template rendering fails (undefined variable)
+    /// - Agent execution fails (spawn error, timeout)
+    /// - Review agent exits with non-zero code (FR23 - fatal error)
+    pub async fn run_review_agent(
+        &self,
+        dev_response: &str,
+        dev_errors: &str,
+    ) -> Result<crate::agent::AgentResult, String> {
+        // Build context with state variables
+        let mut ctx = self.build_context();
+
+        // Add dev agent output
+        ctx.set("dev_response", dev_response.to_string());
+        ctx.set("dev_errors", dev_errors.to_string());
+
+        // Get and render the prompt template
+        let prompt_template = self.get_review_prompt_template();
+        let rendered_prompt = ctx
+            .render(prompt_template)
+            .map_err(|e| format!("Failed to render review prompt: {e}"))?;
+
+        // Add rendered prompt to context for command template
+        ctx.set("prompt", rendered_prompt);
+
+        // Get and render the command template
+        let command_template = self.get_agent_command("review");
+        let command = ctx
+            .render(command_template)
+            .map_err(|e| format!("Failed to render review command: {e}"))?;
+
+        // Run the agent
+        let runner = self.runner_for_agent("review");
+        let result = runner
+            .run(&command)
+            .await
+            .map_err(|e| format!("Review agent error: {e}"))?;
+
+        // Display summary
+        let summary = super::IterationSummary::new(
+            self.iteration(),
+            "review",
+            result.exit_code,
+            result.stdout.len(),
+            result.stderr.len(),
+        );
+        self.display_summary(&summary);
+
+        // FR23: Review agent failure is fatal
+        if !result.success {
+            return Err(format!(
+                "Review agent failed with exit code {:?}",
+                result.exit_code
+            ));
+        }
+
+        Ok(result)
+    }
+
+    /// Runs the next-action agent with dev and review output.
+    ///
+    /// This method:
+    /// 1. Builds a template context with state, dev, and review output
+    /// 2. Renders the next-action prompt template
+    /// 3. Renders the agent command with the prompt
+    /// 4. Executes the command via shell
+    /// 5. Displays a summary (FR17)
+    ///
+    /// # Arguments
+    ///
+    /// * `dev_response` - The stdout from the dev agent
+    /// * `dev_errors` - The stderr from the dev agent
+    /// * `review_response` - The stdout from the review agent
+    /// * `review_errors` - The stderr from the review agent
+    ///
+    /// # Returns
+    ///
+    /// Returns the `AgentResult` on success, or an error message on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Template rendering fails (undefined variable)
+    /// - Agent execution fails (spawn error, timeout)
+    /// - Next-action agent exits with non-zero code (FR41 - fatal error)
+    pub async fn run_next_action_agent(
+        &self,
+        dev_response: &str,
+        dev_errors: &str,
+        review_response: &str,
+        review_errors: &str,
+    ) -> Result<crate::agent::AgentResult, String> {
+        // Build context with state variables
+        let mut ctx = self.build_context();
+
+        // Add dev and review agent output
+        ctx.set("dev_response", dev_response.to_string());
+        ctx.set("dev_errors", dev_errors.to_string());
+        ctx.set("review_response", review_response.to_string());
+        ctx.set("review_errors", review_errors.to_string());
+
+        // Get and render the prompt template
+        let prompt_template = self.get_next_action_prompt_template();
+        let rendered_prompt = ctx
+            .render(prompt_template)
+            .map_err(|e| format!("Failed to render next-action prompt: {e}"))?;
+
+        // Add rendered prompt to context for command template
+        ctx.set("prompt", rendered_prompt);
+
+        // Get and render the command template
+        let command_template = self.get_agent_command("next_action");
+        let command = ctx
+            .render(command_template)
+            .map_err(|e| format!("Failed to render next-action command: {e}"))?;
+
+        // Run the agent
+        let runner = self.runner_for_agent("next_action");
+        let result = runner
+            .run(&command)
+            .await
+            .map_err(|e| format!("Next-action agent error: {e}"))?;
+
+        // Display summary
+        let summary = super::IterationSummary::new(
+            self.iteration(),
+            "next-action",
+            result.exit_code,
+            result.stdout.len(),
+            result.stderr.len(),
+        );
+        self.display_summary(&summary);
+
+        // FR41: Next-action agent failure is fatal
+        if !result.success {
+            return Err(format!(
+                "Next-action agent failed with exit code {:?}",
+                result.exit_code
+            ));
+        }
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
