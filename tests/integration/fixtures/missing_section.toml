@@ -1,0 +1,11 @@
+# Invalid configuration - missing [agents] section for testing validation
+
+[general]
+max_retries = 3
+timeout = 1800
+
+[prompts]
+starting = "Start prompt with {{iteration_count}}"
+continuation = "Continue prompt with {{next_prompt}}"
+review = "Review prompt with {{dev_response}}"
+next_action = "Next action with {{dev_response}}"

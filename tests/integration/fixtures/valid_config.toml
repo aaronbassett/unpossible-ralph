@@ -1,0 +1,54 @@
+# Valid configuration for testing
+# All required sections and fields present
+
+[general]
+max_retries = 3
+max_iterations = 10
+timeout = 1800
+
+[prompts]
+starting = """
+This is the starting prompt for iteration {{iteration_count}}.
+Retry count: {{retry_count}}
+"""
+
+continuation = """
+Continue from where we left off.
+
+## Instructions from previous iteration
+{{next_prompt}}
+
+Iteration: {{iteration_count}}, Retries: {{retry_count}}
+"""
+
+review = """
+Review the following work output.
+
+## Development Agent Output
+{{dev_response}}
+
+## Development Agent Errors
+{{dev_errors}}
+
+Respond with:
+- RESULT: CONTINUE if work is complete
+- RESULT: REPEAT if work needs to be redone
+- RESULT: DONE if all work is complete
+"""
+
+next_action = """
+Generate the next prompt based on:
+
+## Development Agent Output
+{{dev_response}}
+
+## Review Agent Output
+{{review_response}}
+
+Iteration: {{iteration_count}}
+"""
+
+[agents]
+dev = "echo '{{prompt}}'"
+review = { command = "echo 'RESULT: CONTINUE'", timeout = 600 }
+next_action = "echo 'Next task: continue working'"
