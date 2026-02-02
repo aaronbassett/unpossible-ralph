@@ -1,0 +1,8 @@
+# Invalid configuration - syntax error for testing parser error messages
+# Missing closing bracket on section header
+
+[general
+max_retries = 3
+
+[prompts]
+starting = "test"

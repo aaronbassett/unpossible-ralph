@@ -1,0 +1,8 @@
+# Clippy Configuration
+# Per constitution principles (Human-Readable Errors, KISS)
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 25
+
+# Allow certain patterns for CLI tools
+allow-print-in-tests = true
