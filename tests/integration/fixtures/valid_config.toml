@@ -50,5 +50,5 @@ Iteration: {{iteration_count}}
 
 [agents]
 dev = "echo '{{prompt}}'"
-review = { command = "echo 'RESULT: CONTINUE'", timeout = 600 }
-next_action = "echo 'Next task: continue working'"
+review = { command = "echo '{{prompt}}' && echo 'RESULT: CONTINUE'", timeout = 600 }
+next_action = "echo '{{prompt}}' && echo 'Next task: continue working'"
