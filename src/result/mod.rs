@@ -1,50 +1,44 @@
-//! Result parsing for review agent output.
+//! Result parsing for agent output.
 //!
-//! This module provides functionality for parsing the `RESULT: CONTINUE|REPEAT|DONE`
-//! signal from review agent output and routing the orchestration loop accordingly.
+//! This module provides functionality for parsing signals from agent output
+//! and routing the orchestration loop accordingly.
 //!
-//! # Overview
+//! # Signal Types
 //!
-//! The review agent communicates its decision via a structured signal embedded in its
-//! output. This module provides the [`ReviewResult`] enum and parsing logic to extract
-//! and interpret these signals.
+//! - **Review Result**: `RESULT: CONTINUE|REPEAT` - Quality assessment from review agent
+//! - **Dev Done Signal**: `DEV_DONE: YES` - Completion claim from dev agent
+//! - **Done Result**: `DONE: YES|NO` - Completion confirmation from done agent
 //!
 //! # Parsing Rules
 //!
 //! The parser follows these rules (from the specification):
 //!
-//! - Pattern: `(?i)^RESULT:\s*(CONTINUE|REPEAT|DONE)\s*$`
 //! - Case-insensitive matching (D21)
-//! - If multiple valid RESULT lines exist, the last one wins (D22)
-//! - If no valid RESULT is found, defaults to `Repeat` with a warning (D23)
-//! - RESULT must be at the start of a line (E17)
-//! - Only the exact values CONTINUE, REPEAT, DONE are accepted (E16)
+//! - If multiple valid signal lines exist, the last one wins (D22)
+//! - If no valid signal is found, defaults to safe fallback (D23)
+//! - Signal must be at the start of a line (E17)
 //! - Extra text after the value is not matched (E18)
-//! - Empty output is treated as missing RESULT (E19)
+//! - Empty output is treated as missing signal (E19)
 //!
 //! # Examples
 //!
 //! ```
-//! use ralph::result::ReviewResult;
+//! use ralph::result::{ReviewResult, DoneResult, parse_dev_done};
 //!
-//! // Parse from review output
-//! let output = r#"
-//! ## Review Summary
-//! The code looks correct.
-//!
-//! RESULT: CONTINUE
-//! "#;
-//!
-//! let (result, was_explicit) = ReviewResult::parse(output);
+//! // Parse review result
+//! let (result, was_explicit) = ReviewResult::parse("RESULT: CONTINUE");
 //! assert_eq!(result, ReviewResult::Continue);
 //! assert!(was_explicit);
 //!
-//! // Handle missing result
-//! let (result, was_explicit) = ReviewResult::parse("No signal here");
-//! assert_eq!(result, ReviewResult::Repeat);
-//! assert!(!was_explicit); // Indicates this was a default, not explicit
+//! // Check if dev claims done
+//! assert!(parse_dev_done("Work complete!\nDEV_DONE: YES"));
+//!
+//! // Parse done agent confirmation
+//! let (result, was_explicit) = DoneResult::parse("DONE: YES");
+//! assert_eq!(result, DoneResult::Done);
+//! assert!(was_explicit);
 //! ```
 
 mod types;
 
-pub use types::ReviewResult;
+pub use types::{parse_dev_done, DoneResult, ReviewResult};

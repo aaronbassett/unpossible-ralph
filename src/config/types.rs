@@ -23,11 +23,13 @@ fn default_timeout() -> u32 {
 /// continuation = "Continue with: {{next_prompt}}"
 /// review = "Review this: {{dev_response}}"
 /// next_action = "What's next? {{dev_response}}"
+/// done = "Check if all requirements in TASK.md are satisfied."
 ///
 /// [agents]
 /// dev = "claude --prompt '{{prompt}}'"
 /// review = "claude --prompt '{{prompt}}'"
 /// next_action = "claude --prompt '{{prompt}}'"
+/// done = "claude --prompt '{{prompt}}'"
 /// ```
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,6 +68,10 @@ pub struct PromptsConfig {
     pub review: String,
     /// Prompt for the next-action agent (must contain `{{dev_response}}` or `{{dev_errors}}`).
     pub next_action: String,
+    /// Prompt for the done agent (completion confirmation).
+    /// Must NOT contain `{{dev_response}}`, `{{dev_errors}}`, `{{review_response}}`, `{{review_errors}}`
+    /// to ensure the done agent has no context from other agents.
+    pub done: String,
 }
 
 /// Agent command configurations.
@@ -78,6 +84,8 @@ pub struct AgentsConfig {
     pub review: AgentConfig,
     /// Next-action agent command.
     pub next_action: AgentConfig,
+    /// Done agent command (completion confirmation).
+    pub done: AgentConfig,
 }
 
 /// Agent configuration supporting both simple and extended formats.

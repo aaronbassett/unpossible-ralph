@@ -272,7 +272,7 @@ impl LoopExecutor {
     ///
     /// # Arguments
     ///
-    /// * `agent` - The agent name ("dev", "review", or "next_action")
+    /// * `agent` - The agent name ("dev", "review", "next_action", or "done")
     ///
     /// # Returns
     ///
@@ -283,6 +283,7 @@ impl LoopExecutor {
             "dev" => &self.config.agents.dev,
             "review" => &self.config.agents.review,
             "next_action" | "next-action" => &self.config.agents.next_action,
+            "done" => &self.config.agents.done,
             _ => return self.config.general.timeout,
         };
 
@@ -330,17 +331,24 @@ impl LoopExecutor {
         &self.config.prompts.next_action
     }
 
+    /// Gets the done prompt template.
+    #[must_use]
+    pub fn get_done_prompt_template(&self) -> &str {
+        &self.config.prompts.done
+    }
+
     /// Gets the command for a specific agent.
     ///
     /// # Arguments
     ///
-    /// * `agent` - The agent name ("dev", "review", or "next_action")
+    /// * `agent` - The agent name ("dev", "review", "next_action", or "done")
     #[must_use]
     pub fn get_agent_command(&self, agent: &str) -> &str {
         match agent {
             "dev" => self.config.agents.dev.command(),
             "review" => self.config.agents.review.command(),
             "next_action" | "next-action" => self.config.agents.next_action.command(),
+            "done" => self.config.agents.done.command(),
             _ => "",
         }
     }
@@ -568,6 +576,81 @@ impl LoopExecutor {
 
         Ok(result)
     }
+
+    /// Runs the done agent to confirm project completion.
+    ///
+    /// This method:
+    /// 1. Builds a template context with ONLY state variables (no agent context)
+    /// 2. Renders the done prompt template
+    /// 3. Renders the agent command with the prompt
+    /// 4. Executes the command via shell
+    /// 5. Displays a summary (FR17)
+    ///
+    /// **IMPORTANT**: The done agent is intentionally isolated from other agents'
+    /// context. It only receives `iteration_count` and `retry_count`, NOT
+    /// `dev_response`, `dev_errors`, `review_response`, or `review_errors`.
+    /// This ensures the done agent independently examines the filesystem.
+    ///
+    /// # Returns
+    ///
+    /// Returns the `AgentResult` on success, or an error message on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Template rendering fails (undefined variable)
+    /// - Agent execution fails (spawn error, timeout)
+    /// - Done agent exits with non-zero code (fatal error)
+    pub async fn run_done_agent(&self) -> Result<crate::agent::AgentResult, String> {
+        // Build context with ONLY state variables - no agent context!
+        // This ensures the done agent is isolated and must examine the filesystem
+        let mut ctx = TemplateContext::new();
+        ctx.set("iteration_count", self.state.iteration_count.to_string());
+        ctx.set("retry_count", self.state.retry_count.to_string());
+
+        // Get and render the prompt template
+        let prompt_template = self.get_done_prompt_template();
+        let rendered_prompt = ctx
+            .render(prompt_template)
+            .map_err(|e| format!("Failed to render done prompt: {e}"))?;
+
+        // Add rendered prompt to context for command template
+        // Shell-escape single quotes to prevent command injection/breakage
+        ctx.set("prompt", shell_escape_single_quotes(&rendered_prompt));
+
+        // Get and render the command template
+        let command_template = self.get_agent_command("done");
+        let command = ctx
+            .render(command_template)
+            .map_err(|e| format!("Failed to render done command: {e}"))?;
+
+        // Run the agent
+        let runner = self.runner_for_agent("done");
+        let result = runner
+            .run(&command)
+            .await
+            .map_err(|e| format!("Done agent error: {e}"))?;
+
+        // Display summary
+        let summary = super::IterationSummary::new(
+            self.iteration(),
+            "done",
+            result.exit_code,
+            result.stdout.len(),
+            result.stderr.len(),
+        );
+        self.display_summary(&summary);
+
+        // Done agent failure is fatal
+        if !result.success {
+            return Err(format!(
+                "Done agent failed with exit code {:?}",
+                result.exit_code
+            ));
+        }
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -587,11 +670,13 @@ mod tests {
             continuation = "Continue with: {{next_prompt}}"
             review = "Review: {{dev_response}}"
             next_action = "What's next: {{dev_response}}"
+            done = "Check if requirements are satisfied"
 
             [agents]
             dev = "echo '{{prompt}}'"
             review = "echo '{{prompt}}'"
             next_action = "echo '{{prompt}}'"
+            done = "echo '{{prompt}}'"
         "#;
         toml::from_str(toml_str).unwrap()
     }
@@ -608,6 +693,7 @@ mod tests {
             continuation = "Continue: {{next_prompt}}"
             review = "Review: {{dev_response}}"
             next_action = "Next: {{dev_response}}"
+            done = "Check completion"
 
             [agents.dev]
             command = "echo '{{prompt}}'"
@@ -619,6 +705,7 @@ mod tests {
 
             [agents]
             next_action = "echo '{{prompt}}'"
+            done = "echo '{{prompt}}'"
         "#;
         toml::from_str(toml_str).unwrap()
     }
@@ -838,11 +925,13 @@ mod tests {
             continuation = "Continue: {{next_prompt}}"
             review = "Review: {{dev_response}}"
             next_action = "Next: {{dev_response}}"
+            done = "Check completion"
 
             [agents]
             dev = "echo '{{prompt}}'"
             review = "echo '{{prompt}}'"
             next_action = "echo '{{prompt}}'"
+            done = "echo '{{prompt}}'"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         let mut executor = LoopExecutor::new(config);
@@ -911,11 +1000,13 @@ mod tests {
             continuation = "Continue: {{next_prompt}}"
             review = "Review: {{dev_response}}"
             next_action = "Next: {{dev_response}}"
+            done = "Check completion"
 
             [agents]
             dev = "echo '{{prompt}}'"
             review = "echo '{{prompt}}'"
             next_action = "echo '{{prompt}}'"
+            done = "echo '{{prompt}}'"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         let mut executor = LoopExecutor::new(config);
@@ -945,6 +1036,7 @@ mod tests {
         assert_eq!(executor.agent_timeout("review"), 60);
         assert_eq!(executor.agent_timeout("next_action"), 60);
         assert_eq!(executor.agent_timeout("next-action"), 60);
+        assert_eq!(executor.agent_timeout("done"), 60);
     }
 
     #[test]

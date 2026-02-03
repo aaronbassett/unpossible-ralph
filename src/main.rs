@@ -12,7 +12,7 @@ use std::sync::Arc;
 use clap::Parser;
 use ralph::config::{self, Config, ConfigError};
 use ralph::r#loop::{LoopExecutor, LoopOutcome};
-use ralph::result::ReviewResult;
+use ralph::result::{parse_dev_done, DoneResult, ReviewResult};
 use tokio::signal;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -268,6 +268,13 @@ async fn run_loop(
             }
         };
 
+        // Check if dev agent claims work is complete
+        let dev_claims_done = parse_dev_done(&dev_result.stdout);
+        if dev_claims_done {
+            ralph_println!("Dev agent claims completion (DEV_DONE: YES)");
+            info!("Dev agent signaled DEV_DONE: YES");
+        }
+
         // Handle dev agent failure (non-zero exit)
         if !dev_result.success {
             warn!(
@@ -330,11 +337,6 @@ async fn run_loop(
 
         // Route based on result
         match result {
-            ReviewResult::Done => {
-                info!("Received RESULT: DONE");
-                return Ok(LoopOutcome::Done);
-            }
-
             ReviewResult::Repeat => {
                 info!("Received RESULT: REPEAT");
                 executor.state_mut().increment_retry();
@@ -356,6 +358,63 @@ async fn run_loop(
 
             ReviewResult::Continue => {
                 info!("Received RESULT: CONTINUE");
+
+                // If dev claimed done, verify with done agent
+                if dev_claims_done {
+                    ralph_println!("Verifying completion with done agent...");
+
+                    let done_result = tokio::select! {
+                        result = executor.run_done_agent() => result,
+                        _ = shutdown_rx.changed() => {
+                            return Err(*shutdown_rx.borrow());
+                        }
+                    };
+
+                    let done_result = match done_result {
+                        Ok(result) => {
+                            ralph_println!(
+                                "done agent completed: exit={}, stdout={} bytes",
+                                result
+                                    .exit_code
+                                    .map(|c| c.to_string())
+                                    .unwrap_or_else(|| "signal".to_string()),
+                                result.stdout.len()
+                            );
+                            result
+                        }
+                        Err(e) => {
+                            // Done agent failure is fatal
+                            error!(error = %e, "Done agent failed (fatal)");
+                            return Ok(LoopOutcome::Error(e));
+                        }
+                    };
+
+                    // Parse done agent's decision
+                    let (done_decision, was_explicit) = DoneResult::parse(&done_result.stdout);
+
+                    if !was_explicit {
+                        ralph_eprintln!(
+                            "Warning: No DONE signal found in done agent output, treating as NOT_DONE"
+                        );
+                        warn!("No DONE signal found in done agent output, defaulting to NOT_DONE");
+                    }
+
+                    ralph_println!("{}", done_decision);
+
+                    match done_decision {
+                        DoneResult::Done => {
+                            info!("Done agent confirmed completion (DONE: YES)");
+                            return Ok(LoopOutcome::Done);
+                        }
+                        DoneResult::NotDone => {
+                            info!("Done agent rejected completion (DONE: NO), continuing with next-action");
+                            ralph_println!(
+                                "Done agent says work is not complete, continuing to next iteration"
+                            );
+                            // Fall through to run next-action agent
+                        }
+                    }
+                }
 
                 // Run next-action agent
                 let next_action_result = tokio::select! {

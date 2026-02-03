@@ -109,11 +109,13 @@ starting = "Start the task"
 continuation = "Continue with: {{next_prompt}}"
 review = "Review this output: {{dev_response}}"
 next_action = "What's next based on: {{dev_response}}"
+done = "Check if requirements are satisfied"
 
 [agents]
 dev = "echo '{{prompt}}'"
 review = "echo '{{prompt}}'"
 next_action = "echo '{{prompt}}'"
+done = "echo '{{prompt}}'"
 "#
     }
 
@@ -149,11 +151,13 @@ starting = "Start"
 continuation = "Continue: {{next_prompt}}"
 review = "Review: {{dev_response}}"
 next_action = "Next: {{dev_errors}}"
+done = "Check completion"
 
 [agents]
 dev = "cmd {{prompt}}"
 review = "cmd {{prompt}}"
 next_action = "cmd {{prompt}}"
+done = "cmd {{prompt}}"
 "#;
         let file = write_temp_config(toml);
         let config = load(file.path()).unwrap();
@@ -174,6 +178,7 @@ starting = "Start"
 continuation = "Continue: {{next_prompt}}"
 review = "Review: {{dev_response}}"
 next_action = "Next: {{dev_response}}"
+done = "Check completion"
 
 [agents.dev]
 command = "custom-cmd {{prompt}}"
@@ -184,6 +189,7 @@ command = "review-cmd {{prompt}}"
 
 [agents]
 next_action = "simple {{prompt}}"
+done = "done-cmd {{prompt}}"
 "#;
         let file = write_temp_config(toml);
         let config = load(file.path()).unwrap();
@@ -194,6 +200,7 @@ next_action = "simple {{prompt}}"
         assert_eq!(config.agents.review.timeout(), None);
         assert_eq!(config.agents.next_action.command(), "simple {{prompt}}");
         assert_eq!(config.agents.next_action.timeout(), None);
+        assert_eq!(config.agents.done.command(), "done-cmd {{prompt}}");
     }
 
     #[test]
@@ -221,11 +228,13 @@ starting = "Start"
 continuation = "Continue: {{next_prompt}}"
 review = "Review: {{dev_response}}"
 next_action = "Next: {{dev_response}}"
+done = "Check completion"
 
 [agents]
 dev = "cmd {{prompt}}"
 review = "cmd {{prompt}}"
 next_action = "cmd {{prompt}}"
+done = "cmd {{prompt}}"
 "#;
         let file = write_temp_config(toml);
         let result = load(file.path());
@@ -243,11 +252,13 @@ starting = "Start"
 continuation = "Continue: {{next_prompt}}"
 review = "Review: {{dev_response}}"
 next_action = "Next: {{dev_response}}"
+done = "Check completion"
 
 [agents]
 dev = "cmd {{prompt}}"
 review = "cmd {{prompt}}"
 next_action = "cmd {{prompt}}"
+done = "cmd {{prompt}}"
 "#;
         let file = write_temp_config(toml);
         let result = load(file.path());
@@ -265,11 +276,13 @@ starting = "Start"
 continuation = "Continue without next_prompt"
 review = "Review: {{dev_response}}"
 next_action = "Next: {{dev_response}}"
+done = "Check completion"
 
 [agents]
 dev = "cmd {{prompt}}"
 review = "cmd {{prompt}}"
 next_action = "cmd {{prompt}}"
+done = "cmd {{prompt}}"
 "#;
         let file = write_temp_config(toml);
         let result = load(file.path());

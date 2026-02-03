@@ -31,9 +31,8 @@ Review the following work output.
 {{dev_errors}}
 
 Respond with:
-- RESULT: CONTINUE if work is complete
+- RESULT: CONTINUE if work quality is acceptable
 - RESULT: REPEAT if work needs to be redone
-- RESULT: DONE if all work is complete
 """
 
 next_action = """
@@ -48,7 +47,18 @@ Generate the next prompt based on:
 Iteration: {{iteration_count}}
 """
 
+done = """
+Check if all requirements are satisfied by examining the source code.
+
+Iteration: {{iteration_count}}
+
+Respond with:
+- DONE: YES if all requirements are satisfied
+- DONE: NO if more work is needed
+"""
+
 [agents]
 dev = "echo '{{prompt}}'"
 review = { command = "echo '{{prompt}}' && echo 'RESULT: CONTINUE'", timeout = 600 }
 next_action = "echo '{{prompt}}' && echo 'Next task: continue working'"
+done = "echo '{{prompt}}' && echo 'DONE: YES'"

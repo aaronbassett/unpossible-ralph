@@ -30,6 +30,11 @@ pub enum ValidationError {
     /// The continuation prompt is missing the required `{{next_prompt}}` placeholder.
     #[error("Prompt 'continuation' must include {{{{next_prompt}}}} placeholder")]
     ContinuationPromptMissingPlaceholder,
+
+    /// The done prompt contains forbidden context placeholders.
+    /// The done agent must be isolated from other agents' context.
+    #[error("Prompt 'done' must NOT include {{{{dev_response}}}}, {{{{dev_errors}}}}, {{{{review_response}}}}, or {{{{review_errors}}}} (done agent must be context-isolated)")]
+    DonePromptContainsForbiddenPlaceholder,
 }
 
 /// Validates the configuration according to ralph's requirements.
@@ -41,6 +46,7 @@ pub enum ValidationError {
 /// 3. Next-action prompt must contain `{{dev_response}}` or `{{dev_errors}}`
 /// 4. Continuation prompt must contain `{{next_prompt}}`
 /// 5. No prompt templates can be empty
+/// 6. Done prompt must NOT contain `{{dev_response}}`, `{{dev_errors}}`, `{{review_response}}`, or `{{review_errors}}`
 ///
 /// # Errors
 ///
@@ -51,11 +57,13 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
     validate_prompt_not_empty(&config.prompts.continuation, "continuation")?;
     validate_prompt_not_empty(&config.prompts.review, "review")?;
     validate_prompt_not_empty(&config.prompts.next_action, "next_action")?;
+    validate_prompt_not_empty(&config.prompts.done, "done")?;
 
     // Validate agent commands contain {{prompt}}
     validate_agent_has_prompt(&config.agents.dev, "dev")?;
     validate_agent_has_prompt(&config.agents.review, "review")?;
     validate_agent_has_prompt(&config.agents.next_action, "next_action")?;
+    validate_agent_has_prompt(&config.agents.done, "done")?;
 
     // Validate review prompt contains {{dev_response}} or {{dev_errors}}
     if !contains_placeholder(&config.prompts.review, "dev_response")
@@ -74,6 +82,16 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
     // Validate continuation prompt contains {{next_prompt}}
     if !contains_placeholder(&config.prompts.continuation, "next_prompt") {
         return Err(ValidationError::ContinuationPromptMissingPlaceholder);
+    }
+
+    // Validate done prompt does NOT contain forbidden context placeholders
+    // The done agent must be isolated from other agents' context
+    if contains_placeholder(&config.prompts.done, "dev_response")
+        || contains_placeholder(&config.prompts.done, "dev_errors")
+        || contains_placeholder(&config.prompts.done, "review_response")
+        || contains_placeholder(&config.prompts.done, "review_errors")
+    {
+        return Err(ValidationError::DonePromptContainsForbiddenPlaceholder);
     }
 
     Ok(())
@@ -122,11 +140,13 @@ mod tests {
                 continuation: "Continue: {{next_prompt}}".to_string(),
                 review: "Review: {{dev_response}}".to_string(),
                 next_action: "Next: {{dev_response}}".to_string(),
+                done: "Check if requirements are satisfied".to_string(),
             },
             agents: AgentsConfig {
                 dev: AgentConfig::Simple("echo {{prompt}}".to_string()),
                 review: AgentConfig::Simple("echo {{prompt}}".to_string()),
                 next_action: AgentConfig::Simple("echo {{prompt}}".to_string()),
+                done: AgentConfig::Simple("echo {{prompt}}".to_string()),
             },
         }
     }
@@ -260,5 +280,76 @@ mod tests {
         assert!(!contains_placeholder("hello {{ name }} world", "name"));
         assert!(contains_placeholder("{{name}}", "name"));
         assert!(!contains_placeholder("", "name"));
+    }
+
+    #[test]
+    fn test_empty_done_prompt() {
+        let mut config = valid_config();
+        config.prompts.done = "".to_string();
+        let err = validate(&config).unwrap_err();
+        assert!(matches!(err, ValidationError::EmptyPrompt { prompt } if prompt == "done"));
+    }
+
+    #[test]
+    fn test_missing_prompt_in_done_agent() {
+        let mut config = valid_config();
+        config.agents.done = AgentConfig::Simple("echo hello".to_string());
+        let err = validate(&config).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::MissingPromptPlaceholder { agent } if agent == "done")
+        );
+    }
+
+    #[test]
+    fn test_done_prompt_with_dev_response_forbidden() {
+        let mut config = valid_config();
+        config.prompts.done = "Check: {{dev_response}}".to_string();
+        let err = validate(&config).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::DonePromptContainsForbiddenPlaceholder
+        ));
+    }
+
+    #[test]
+    fn test_done_prompt_with_dev_errors_forbidden() {
+        let mut config = valid_config();
+        config.prompts.done = "Check errors: {{dev_errors}}".to_string();
+        let err = validate(&config).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::DonePromptContainsForbiddenPlaceholder
+        ));
+    }
+
+    #[test]
+    fn test_done_prompt_with_review_response_forbidden() {
+        let mut config = valid_config();
+        config.prompts.done = "Review said: {{review_response}}".to_string();
+        let err = validate(&config).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::DonePromptContainsForbiddenPlaceholder
+        ));
+    }
+
+    #[test]
+    fn test_done_prompt_with_review_errors_forbidden() {
+        let mut config = valid_config();
+        config.prompts.done = "Review errors: {{review_errors}}".to_string();
+        let err = validate(&config).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::DonePromptContainsForbiddenPlaceholder
+        ));
+    }
+
+    #[test]
+    fn test_done_prompt_with_allowed_placeholders() {
+        let mut config = valid_config();
+        // iteration_count and retry_count are allowed
+        config.prompts.done =
+            "Iter {{iteration_count}}, retry {{retry_count}}: Check requirements".to_string();
+        assert!(validate(&config).is_ok());
     }
 }

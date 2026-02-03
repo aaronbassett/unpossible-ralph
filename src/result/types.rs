@@ -1,34 +1,61 @@
-//! Result types for parsing review agent output.
+//! Result types for parsing agent output.
 //!
-//! This module provides the [`ReviewResult`] enum and associated parsing logic
-//! for interpreting the `RESULT: CONTINUE|REPEAT|DONE` signal from review agents.
+//! This module provides:
+//! - [`ReviewResult`] enum for interpreting `RESULT: CONTINUE|REPEAT` from review agents
+//! - [`DoneResult`] enum for interpreting `DONE: YES|NO` from done agents
+//! - [`parse_dev_done`] function for detecting `DEV_DONE: YES` in dev agent output
 
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// Regex pattern for matching RESULT lines.
+/// Regex pattern for matching RESULT lines (review agent).
 ///
-/// Pattern: `(?i)^RESULT:\s*(CONTINUE|REPEAT|DONE)\s*$`
+/// Pattern: `(?im)^RESULT:\s*(CONTINUE|REPEAT)\s*$`
 /// - Case-insensitive match
 /// - Line must start with "RESULT:" (any case)
 /// - Followed by optional whitespace
-/// - Then one of: CONTINUE, REPEAT, DONE (any case)
+/// - Then one of: CONTINUE, REPEAT (any case)
 /// - Optional trailing whitespace, then end of line
 static RESULT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?im)^RESULT:\s*(CONTINUE|REPEAT|DONE)\s*$")
+    Regex::new(r"(?im)^RESULT:\s*(CONTINUE|REPEAT)\s*$")
         .expect("RESULT_PATTERN regex should be valid")
+});
+
+/// Regex pattern for matching DEV_DONE lines (dev agent).
+///
+/// Pattern: `(?im)^DEV_DONE:\s*YES\s*$`
+/// - Case-insensitive match
+/// - Line must start with "DEV_DONE:" (any case)
+/// - Followed by optional whitespace
+/// - Then "YES" (any case)
+/// - Optional trailing whitespace, then end of line
+static DEV_DONE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?im)^DEV_DONE:\s*YES\s*$").expect("DEV_DONE_PATTERN regex should be valid")
+});
+
+/// Regex pattern for matching DONE lines (done agent).
+///
+/// Pattern: `(?im)^DONE:\s*(YES|NO)\s*$`
+/// - Case-insensitive match
+/// - Line must start with "DONE:" (any case)
+/// - Followed by optional whitespace
+/// - Then "YES" or "NO" (any case)
+/// - Optional trailing whitespace, then end of line
+static DONE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?im)^DONE:\s*(YES|NO)\s*$").expect("DONE_PATTERN regex should be valid")
 });
 
 /// Parsed RESULT from review agent output.
 ///
-/// This enum represents the three possible routing decisions that a review agent
-/// can signal to control the orchestration loop's behavior.
+/// This enum represents the two possible quality assessment decisions that a review agent
+/// can signal. The review agent only assesses quality (CONTINUE/REPEAT), while completion
+/// confirmation is handled by the separate done agent.
 ///
 /// # Parsing
 ///
 /// Use [`ReviewResult::parse`] to extract the result from review agent output.
 /// The parser looks for lines matching the pattern `RESULT: <VALUE>` where
-/// `<VALUE>` is one of `CONTINUE`, `REPEAT`, or `DONE` (case-insensitive).
+/// `<VALUE>` is one of `CONTINUE` or `REPEAT` (case-insensitive).
 ///
 /// # Examples
 ///
@@ -41,8 +68,8 @@ static RESULT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// assert!(explicit);
 ///
 /// // Case insensitive
-/// let (result, _) = ReviewResult::parse("result: done");
-/// assert_eq!(result, ReviewResult::Done);
+/// let (result, _) = ReviewResult::parse("result: repeat");
+/// assert_eq!(result, ReviewResult::Repeat);
 ///
 /// // Missing result defaults to Repeat
 /// let (result, explicit) = ReviewResult::parse("No result here");
@@ -51,16 +78,16 @@ static RESULT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReviewResult {
-    /// Work complete, proceed to next task.
+    /// Work quality is acceptable, proceed.
     ///
     /// When the review agent signals `CONTINUE`, the orchestrator will:
-    /// 1. Reset the retry count to 0
-    /// 2. Run the next-action agent to generate the next prompt
-    /// 3. Increment the iteration count
-    /// 4. Continue the loop with the continuation prompt
+    /// 1. Check if the dev agent claimed completion (DEV_DONE: YES)
+    /// 2. If dev claimed done, run the done agent to confirm
+    /// 3. If done agent confirms, exit successfully
+    /// 4. Otherwise, run next-action agent and continue to next iteration
     Continue,
 
-    /// Work incomplete, retry current task.
+    /// Work quality is not acceptable, retry current task.
     ///
     /// When the review agent signals `REPEAT`, the orchestrator will:
     /// 1. Increment the retry count
@@ -69,19 +96,13 @@ pub enum ReviewResult {
     ///
     /// This is also the default result when no valid RESULT line is found.
     Repeat,
-
-    /// All work complete, exit loop.
-    ///
-    /// When the review agent signals `DONE`, the orchestrator will
-    /// exit the loop successfully with exit code 0.
-    Done,
 }
 
 impl ReviewResult {
     /// Parse RESULT from review agent output.
     ///
     /// Searches for lines matching the pattern `RESULT: <VALUE>` where
-    /// `<VALUE>` is one of `CONTINUE`, `REPEAT`, or `DONE` (case-insensitive).
+    /// `<VALUE>` is one of `CONTINUE` or `REPEAT` (case-insensitive).
     ///
     /// # Returns
     ///
@@ -90,7 +111,7 @@ impl ReviewResult {
     /// - `was_explicit` is `false` if defaulting to `Repeat` due to:
     ///   - Empty output
     ///   - No RESULT line found
-    ///   - Invalid RESULT value (e.g., "MAYBE")
+    ///   - Invalid RESULT value (e.g., "MAYBE", "DONE")
     ///   - RESULT with extra text on the line
     ///
     /// # Parsing Rules
@@ -98,7 +119,7 @@ impl ReviewResult {
     /// - Case-insensitive matching for both "RESULT:" and the value
     /// - If multiple valid RESULT lines exist, the last one wins (D22)
     /// - RESULT must be at the start of a line (not in the middle of a word)
-    /// - Only the exact values CONTINUE, REPEAT, DONE are accepted
+    /// - Only the exact values CONTINUE, REPEAT are accepted
     /// - Extra whitespace around the value is trimmed
     ///
     /// # Examples
@@ -118,7 +139,7 @@ impl ReviewResult {
     /// assert!(!explicit);
     ///
     /// // Extra text on line - not matched
-    /// let (result, explicit) = ReviewResult::parse("RESULT: DONE - all tasks complete");
+    /// let (result, explicit) = ReviewResult::parse("RESULT: CONTINUE - proceed");
     /// assert_eq!(result, ReviewResult::Repeat);
     /// assert!(!explicit);
     /// ```
@@ -132,12 +153,11 @@ impl ReviewResult {
         let mut last_match: Option<Self> = None;
 
         for caps in RESULT_PATTERN.captures_iter(output) {
-            // Group 1 contains the result value (CONTINUE, REPEAT, or DONE)
+            // Group 1 contains the result value (CONTINUE or REPEAT)
             if let Some(value) = caps.get(1) {
                 let result = match value.as_str().to_uppercase().as_str() {
                     "CONTINUE" => Self::Continue,
                     "REPEAT" => Self::Repeat,
-                    "DONE" => Self::Done,
                     // This shouldn't happen due to regex, but handle defensively
                     _ => continue,
                 };
@@ -160,14 +180,162 @@ impl ReviewResult {
     ///
     /// assert_eq!(ReviewResult::Continue.as_str(), "CONTINUE");
     /// assert_eq!(ReviewResult::Repeat.as_str(), "REPEAT");
-    /// assert_eq!(ReviewResult::Done.as_str(), "DONE");
     /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Continue => "CONTINUE",
             Self::Repeat => "REPEAT",
-            Self::Done => "DONE",
         }
+    }
+}
+
+/// Parse DEV_DONE signal from dev agent output.
+///
+/// Searches for lines matching the pattern `DEV_DONE: YES` (case-insensitive).
+/// The dev agent uses this signal to indicate it believes all work is complete.
+///
+/// # Returns
+///
+/// Returns `true` if `DEV_DONE: YES` was found, `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use ralph::result::parse_dev_done;
+///
+/// assert!(parse_dev_done("Work complete!\nDEV_DONE: YES"));
+/// assert!(parse_dev_done("dev_done: yes"));
+/// assert!(!parse_dev_done("DEV_DONE: NO"));
+/// assert!(!parse_dev_done("No signal here"));
+/// ```
+pub fn parse_dev_done(output: &str) -> bool {
+    DEV_DONE_PATTERN.is_match(output)
+}
+
+/// Parsed result from done agent output.
+///
+/// The done agent independently confirms whether the project is complete by
+/// examining the filesystem. It has no access to other agents' context.
+///
+/// # Parsing
+///
+/// Use [`DoneResult::parse`] to extract the result from done agent output.
+/// The parser looks for lines matching `DONE: YES` or `DONE: NO` (case-insensitive).
+///
+/// # Examples
+///
+/// ```
+/// use ralph::result::DoneResult;
+///
+/// let (result, explicit) = DoneResult::parse("DONE: YES");
+/// assert_eq!(result, DoneResult::Done);
+/// assert!(explicit);
+///
+/// let (result, explicit) = DoneResult::parse("DONE: NO");
+/// assert_eq!(result, DoneResult::NotDone);
+/// assert!(explicit);
+///
+/// // Missing signal defaults to NotDone
+/// let (result, explicit) = DoneResult::parse("No signal");
+/// assert_eq!(result, DoneResult::NotDone);
+/// assert!(!explicit);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DoneResult {
+    /// Project is confirmed complete.
+    ///
+    /// When the done agent signals `DONE: YES`, the orchestrator will
+    /// exit the loop successfully with exit code 0.
+    Done,
+
+    /// Project is not yet complete.
+    ///
+    /// When the done agent signals `DONE: NO` (or no signal is found),
+    /// the orchestrator will continue with the next-action agent flow.
+    NotDone,
+}
+
+impl DoneResult {
+    /// Parse DONE signal from done agent output.
+    ///
+    /// Searches for lines matching the pattern `DONE: YES` or `DONE: NO`
+    /// (case-insensitive).
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of `(DoneResult, was_explicit)`:
+    /// - `was_explicit` is `true` if a valid DONE line was found
+    /// - `was_explicit` is `false` if defaulting to `NotDone` due to:
+    ///   - Empty output
+    ///   - No DONE line found
+    ///   - Invalid DONE value
+    ///   - DONE with extra text on the line
+    ///
+    /// # Parsing Rules
+    ///
+    /// - Case-insensitive matching for both "DONE:" and the value
+    /// - If multiple valid DONE lines exist, the last one wins
+    /// - DONE must be at the start of a line
+    /// - Only the exact values YES, NO are accepted
+    /// - Extra whitespace around the value is trimmed
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ralph::result::DoneResult;
+    ///
+    /// // Basic parsing
+    /// let (result, explicit) = DoneResult::parse("DONE: YES");
+    /// assert_eq!(result, DoneResult::Done);
+    /// assert!(explicit);
+    ///
+    /// // Case insensitive
+    /// let (result, _) = DoneResult::parse("done: no");
+    /// assert_eq!(result, DoneResult::NotDone);
+    ///
+    /// // Missing signal defaults to NotDone
+    /// let (result, explicit) = DoneResult::parse("No signal here");
+    /// assert_eq!(result, DoneResult::NotDone);
+    /// assert!(!explicit);
+    /// ```
+    pub fn parse(output: &str) -> (Self, bool) {
+        // Handle empty output
+        if output.is_empty() {
+            return (Self::NotDone, false);
+        }
+
+        // Find all matches and use the last one
+        let mut last_match: Option<Self> = None;
+
+        for caps in DONE_PATTERN.captures_iter(output) {
+            if let Some(value) = caps.get(1) {
+                let result = match value.as_str().to_uppercase().as_str() {
+                    "YES" => Self::Done,
+                    "NO" => Self::NotDone,
+                    _ => continue,
+                };
+                last_match = Some(result);
+            }
+        }
+
+        match last_match {
+            Some(result) => (result, true),
+            None => (Self::NotDone, false),
+        }
+    }
+
+    /// Returns the string representation of this result.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Done => "YES",
+            Self::NotDone => "NO",
+        }
+    }
+}
+
+impl std::fmt::Display for DoneResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DONE: {}", self.as_str())
     }
 }
 
@@ -199,12 +367,7 @@ mod tests {
         assert!(explicit);
     }
 
-    #[test]
-    fn parse_result_done() {
-        let (result, explicit) = ReviewResult::parse("RESULT: DONE");
-        assert_eq!(result, ReviewResult::Done);
-        assert!(explicit);
-    }
+    // Note: RESULT: DONE is no longer valid - done agent uses separate DONE: YES signal
 
     // ==========================================================================
     // Case insensitivity tests (D21)
@@ -212,29 +375,29 @@ mod tests {
 
     #[test]
     fn parse_case_insensitive_lowercase_result_keyword() {
-        let (result, explicit) = ReviewResult::parse("result: DONE");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("result: CONTINUE");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_case_insensitive_lowercase_value() {
-        let (result, explicit) = ReviewResult::parse("RESULT: done");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT: repeat");
+        assert_eq!(result, ReviewResult::Repeat);
         assert!(explicit);
     }
 
     #[test]
     fn parse_case_insensitive_all_lowercase() {
-        let (result, explicit) = ReviewResult::parse("result: done");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("result: continue");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_case_insensitive_mixed_case() {
-        let (result, explicit) = ReviewResult::parse("Result: Done");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("Result: Continue");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
@@ -290,26 +453,26 @@ mod tests {
     }
 
     #[test]
-    fn parse_multiple_results_last_wins_continue_then_done() {
-        let output = "RESULT: CONTINUE\nRESULT: DONE";
+    fn parse_multiple_results_last_wins_continue_then_repeat() {
+        let output = "RESULT: CONTINUE\nRESULT: REPEAT";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Done);
+        assert_eq!(result, ReviewResult::Repeat);
         assert!(explicit);
     }
 
     #[test]
     fn parse_multiple_results_last_wins_three_results() {
-        let output = "RESULT: DONE\nRESULT: REPEAT\nRESULT: CONTINUE";
+        let output = "RESULT: REPEAT\nRESULT: CONTINUE\nRESULT: REPEAT";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Continue);
+        assert_eq!(result, ReviewResult::Repeat);
         assert!(explicit);
     }
 
     #[test]
     fn parse_multiple_results_with_mixed_case() {
-        let output = "result: repeat\nRESULT: DONE";
+        let output = "result: repeat\nRESULT: CONTINUE";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Done);
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
@@ -367,10 +530,18 @@ mod tests {
     #[test]
     fn parse_invalid_value_with_valid_later() {
         // Invalid followed by valid - valid is used
-        let output = "RESULT: MAYBE\nRESULT: DONE";
+        let output = "RESULT: MAYBE\nRESULT: CONTINUE";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Done);
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
+    }
+
+    #[test]
+    fn parse_done_is_now_invalid_for_review() {
+        // DONE is no longer valid for ReviewResult
+        let (result, explicit) = ReviewResult::parse("RESULT: DONE");
+        assert_eq!(result, ReviewResult::Repeat);
+        assert!(!explicit);
     }
 
     // ==========================================================================
@@ -379,36 +550,36 @@ mod tests {
 
     #[test]
     fn parse_whitespace_after_colon() {
-        let (result, explicit) = ReviewResult::parse("RESULT:   DONE");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT:   CONTINUE");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_whitespace_after_value() {
-        let (result, explicit) = ReviewResult::parse("RESULT: DONE   ");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT: CONTINUE   ");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_whitespace_both_sides() {
-        let (result, explicit) = ReviewResult::parse("RESULT:   DONE   ");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT:   CONTINUE   ");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_no_whitespace_after_colon() {
-        let (result, explicit) = ReviewResult::parse("RESULT:DONE");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT:CONTINUE");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
     #[test]
     fn parse_tabs_as_whitespace() {
-        let (result, explicit) = ReviewResult::parse("RESULT:\t\tDONE\t");
-        assert_eq!(result, ReviewResult::Done);
+        let (result, explicit) = ReviewResult::parse("RESULT:\t\tCONTINUE\t");
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
@@ -418,7 +589,7 @@ mod tests {
 
     #[test]
     fn parse_result_not_at_line_start() {
-        let output = "The RESULT: DONE is shown here";
+        let output = "The RESULT: CONTINUE is shown here";
         let (result, explicit) = ReviewResult::parse(output);
         assert_eq!(result, ReviewResult::Repeat);
         assert!(!explicit);
@@ -426,7 +597,7 @@ mod tests {
 
     #[test]
     fn parse_preresult_not_matched() {
-        let output = "PRERESULT: DONE";
+        let output = "PRERESULT: CONTINUE";
         let (result, explicit) = ReviewResult::parse(output);
         assert_eq!(result, ReviewResult::Repeat);
         assert!(!explicit);
@@ -443,7 +614,7 @@ mod tests {
     #[test]
     fn parse_indented_result_not_matched() {
         // Leading whitespace means not at line start
-        let output = "  RESULT: DONE";
+        let output = "  RESULT: CONTINUE";
         let (result, explicit) = ReviewResult::parse(output);
         assert_eq!(result, ReviewResult::Repeat);
         assert!(!explicit);
@@ -455,7 +626,7 @@ mod tests {
 
     #[test]
     fn parse_extra_text_after_value() {
-        let output = "RESULT: DONE - all tasks complete";
+        let output = "RESULT: CONTINUE - all tasks complete";
         let (result, explicit) = ReviewResult::parse(output);
         assert_eq!(result, ReviewResult::Repeat);
         assert!(!explicit);
@@ -471,7 +642,7 @@ mod tests {
 
     #[test]
     fn parse_extra_word_after_value() {
-        let output = "RESULT: DONE now";
+        let output = "RESULT: CONTINUE now";
         let (result, explicit) = ReviewResult::parse(output);
         assert_eq!(result, ReviewResult::Repeat);
         assert!(!explicit);
@@ -510,9 +681,9 @@ Please proceed with the next task.
 
     #[test]
     fn parse_result_at_end_of_output() {
-        let output = "Everything looks good!\nRESULT: DONE";
+        let output = "Everything looks good!\nRESULT: CONTINUE";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Done);
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
@@ -538,9 +709,9 @@ Please proceed with the next task.
 
     #[test]
     fn parse_windows_line_endings() {
-        let output = "Review complete\r\nRESULT: DONE\r\nEnd of review";
+        let output = "Review complete\r\nRESULT: CONTINUE\r\nEnd of review";
         let (result, explicit) = ReviewResult::parse(output);
-        assert_eq!(result, ReviewResult::Done);
+        assert_eq!(result, ReviewResult::Continue);
         assert!(explicit);
     }
 
@@ -567,15 +738,9 @@ Please proceed with the next task.
     }
 
     #[test]
-    fn as_str_done() {
-        assert_eq!(ReviewResult::Done.as_str(), "DONE");
-    }
-
-    #[test]
     fn display_trait() {
         assert_eq!(format!("{}", ReviewResult::Continue), "CONTINUE");
         assert_eq!(format!("{}", ReviewResult::Repeat), "REPEAT");
-        assert_eq!(format!("{}", ReviewResult::Done), "DONE");
     }
 
     // ==========================================================================
@@ -586,10 +751,7 @@ Please proceed with the next task.
     fn equality() {
         assert_eq!(ReviewResult::Continue, ReviewResult::Continue);
         assert_eq!(ReviewResult::Repeat, ReviewResult::Repeat);
-        assert_eq!(ReviewResult::Done, ReviewResult::Done);
         assert_ne!(ReviewResult::Continue, ReviewResult::Repeat);
-        assert_ne!(ReviewResult::Continue, ReviewResult::Done);
-        assert_ne!(ReviewResult::Repeat, ReviewResult::Done);
     }
 
     #[test]
@@ -601,7 +763,7 @@ Please proceed with the next task.
 
     #[test]
     fn copy() {
-        let original = ReviewResult::Done;
+        let original = ReviewResult::Continue;
         let copied = original; // Copy, not move
         assert_eq!(original, copied);
     }
@@ -610,7 +772,6 @@ Please proceed with the next task.
     fn debug() {
         assert_eq!(format!("{:?}", ReviewResult::Continue), "Continue");
         assert_eq!(format!("{:?}", ReviewResult::Repeat), "Repeat");
-        assert_eq!(format!("{:?}", ReviewResult::Done), "Done");
     }
 
     // ==========================================================================
@@ -624,11 +785,118 @@ Please proceed with the next task.
         let mut set = HashSet::new();
         set.insert(ReviewResult::Continue);
         set.insert(ReviewResult::Repeat);
-        set.insert(ReviewResult::Done);
 
-        assert_eq!(set.len(), 3);
+        assert_eq!(set.len(), 2);
         assert!(set.contains(&ReviewResult::Continue));
         assert!(set.contains(&ReviewResult::Repeat));
-        assert!(set.contains(&ReviewResult::Done));
+    }
+
+    // ==========================================================================
+    // DEV_DONE parsing tests
+    // ==========================================================================
+
+    #[test]
+    fn parse_dev_done_present() {
+        assert!(parse_dev_done("Work complete!\nDEV_DONE: YES\nEnd"));
+    }
+
+    #[test]
+    fn parse_dev_done_case_insensitive() {
+        assert!(parse_dev_done("dev_done: yes"));
+        assert!(parse_dev_done("Dev_Done: Yes"));
+        assert!(parse_dev_done("DEV_DONE: YES"));
+    }
+
+    #[test]
+    fn parse_dev_done_not_present() {
+        assert!(!parse_dev_done("No signal here"));
+        assert!(!parse_dev_done("DEV_DONE: NO"));
+        assert!(!parse_dev_done(""));
+    }
+
+    #[test]
+    fn parse_dev_done_with_whitespace() {
+        assert!(parse_dev_done("DEV_DONE:   YES   "));
+        assert!(parse_dev_done("DEV_DONE:\tYES\t"));
+    }
+
+    #[test]
+    fn parse_dev_done_extra_text_not_matched() {
+        assert!(!parse_dev_done("DEV_DONE: YES - all done"));
+        assert!(!parse_dev_done("  DEV_DONE: YES")); // indented
+    }
+
+    // ==========================================================================
+    // DoneResult parsing tests
+    // ==========================================================================
+
+    #[test]
+    fn parse_done_result_yes() {
+        let (result, explicit) = DoneResult::parse("DONE: YES");
+        assert_eq!(result, DoneResult::Done);
+        assert!(explicit);
+    }
+
+    #[test]
+    fn parse_done_result_no() {
+        let (result, explicit) = DoneResult::parse("DONE: NO");
+        assert_eq!(result, DoneResult::NotDone);
+        assert!(explicit);
+    }
+
+    #[test]
+    fn parse_done_result_case_insensitive() {
+        let (result, _) = DoneResult::parse("done: yes");
+        assert_eq!(result, DoneResult::Done);
+
+        let (result, _) = DoneResult::parse("Done: No");
+        assert_eq!(result, DoneResult::NotDone);
+    }
+
+    #[test]
+    fn parse_done_result_missing_defaults_to_not_done() {
+        let (result, explicit) = DoneResult::parse("No signal here");
+        assert_eq!(result, DoneResult::NotDone);
+        assert!(!explicit);
+    }
+
+    #[test]
+    fn parse_done_result_empty_defaults_to_not_done() {
+        let (result, explicit) = DoneResult::parse("");
+        assert_eq!(result, DoneResult::NotDone);
+        assert!(!explicit);
+    }
+
+    #[test]
+    fn parse_done_result_last_wins() {
+        let output = "DONE: NO\nDONE: YES";
+        let (result, explicit) = DoneResult::parse(output);
+        assert_eq!(result, DoneResult::Done);
+        assert!(explicit);
+    }
+
+    #[test]
+    fn parse_done_result_with_whitespace() {
+        let (result, _) = DoneResult::parse("DONE:   YES   ");
+        assert_eq!(result, DoneResult::Done);
+    }
+
+    #[test]
+    fn parse_done_result_extra_text_not_matched() {
+        let (result, explicit) = DoneResult::parse("DONE: YES - all complete");
+        assert_eq!(result, DoneResult::NotDone);
+        assert!(!explicit);
+    }
+
+    #[test]
+    fn done_result_as_str() {
+        assert_eq!(DoneResult::Done.as_str(), "YES");
+        assert_eq!(DoneResult::NotDone.as_str(), "NO");
+    }
+
+    #[test]
+    fn done_result_display() {
+        assert_eq!(format!("{}", DoneResult::Done), "DONE: YES");
+        assert_eq!(format!("{}", DoneResult::NotDone), "DONE: NO");
     }
 }
