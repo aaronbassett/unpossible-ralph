@@ -12,7 +12,7 @@
 
 use crate::agent::AgentRunner;
 use crate::config::Config;
-use crate::template::TemplateContext;
+use crate::template::{shell_escape_single_quotes, TemplateContext};
 use tracing::info;
 
 use super::{IterationSummary, LoopState};
@@ -374,7 +374,8 @@ impl LoopExecutor {
             .map_err(|e| format!("Failed to render dev prompt: {e}"))?;
 
         // Add rendered prompt to context for command template
-        ctx.set("prompt", rendered_prompt);
+        // Shell-escape single quotes to prevent command injection/breakage
+        ctx.set("prompt", shell_escape_single_quotes(&rendered_prompt));
 
         // Get and render the command template
         let command_template = self.get_agent_command("dev");
@@ -445,7 +446,8 @@ impl LoopExecutor {
             .map_err(|e| format!("Failed to render review prompt: {e}"))?;
 
         // Add rendered prompt to context for command template
-        ctx.set("prompt", rendered_prompt);
+        // Shell-escape single quotes to prevent command injection/breakage
+        ctx.set("prompt", shell_escape_single_quotes(&rendered_prompt));
 
         // Get and render the command template
         let command_template = self.get_agent_command("review");
@@ -530,7 +532,8 @@ impl LoopExecutor {
             .map_err(|e| format!("Failed to render next-action prompt: {e}"))?;
 
         // Add rendered prompt to context for command template
-        ctx.set("prompt", rendered_prompt);
+        // Shell-escape single quotes to prevent command injection/breakage
+        ctx.set("prompt", shell_escape_single_quotes(&rendered_prompt));
 
         // Get and render the command template
         let command_template = self.get_agent_command("next_action");

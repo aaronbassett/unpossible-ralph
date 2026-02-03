@@ -30,6 +30,43 @@ use std::fmt;
 use std::sync::LazyLock;
 use thiserror::Error;
 
+/// Escapes a string for safe use within single quotes in shell commands.
+///
+/// This function handles the edge case where a value contains single quotes,
+/// which would break shell command parsing if embedded directly in single-quoted
+/// strings. The escape sequence `'\''` works by:
+/// 1. Ending the current single-quoted string with `'`
+/// 2. Adding an escaped literal single quote `\'`
+/// 3. Starting a new single-quoted string with `'`
+///
+/// # Arguments
+///
+/// * `s` - The string to escape
+///
+/// # Returns
+///
+/// A string safe for embedding within single quotes in a shell command.
+///
+/// # Example
+///
+/// ```
+/// use ralph::template::shell_escape_single_quotes;
+///
+/// // String without quotes passes through unchanged
+/// assert_eq!(shell_escape_single_quotes("hello"), "hello");
+///
+/// // Single quotes are escaped
+/// assert_eq!(shell_escape_single_quotes("it's"), "it'\\''s");
+///
+/// // Can be used in shell commands
+/// let value = shell_escape_single_quotes("console.log('hello')");
+/// let cmd = format!("echo '{}'", value);
+/// // cmd is now: echo 'console.log('\''hello'\'')'
+/// ```
+pub fn shell_escape_single_quotes(s: &str) -> String {
+    s.replace('\'', "'\\''")
+}
+
 /// Regex pattern for matching template variables.
 ///
 /// Pattern: `\{\{([a-z_]+)\}\}`
@@ -786,5 +823,71 @@ mod tests {
         let template = "claude-cli --message '{{prompt}}'";
         let result = ctx.render(template).unwrap();
         assert_eq!(result, "claude-cli --message 'Please analyze the code'");
+    }
+
+    // =========================================================================
+    // Shell escaping tests
+    // =========================================================================
+
+    #[test]
+    fn test_shell_escape_no_quotes() {
+        assert_eq!(
+            super::shell_escape_single_quotes("hello world"),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn test_shell_escape_single_quote() {
+        assert_eq!(super::shell_escape_single_quotes("it's"), "it'\\''s");
+    }
+
+    #[test]
+    fn test_shell_escape_multiple_quotes() {
+        assert_eq!(
+            super::shell_escape_single_quotes("console.log('hello', 'world')"),
+            "console.log('\\''hello'\\'', '\\''world'\\'')"
+        );
+    }
+
+    #[test]
+    fn test_shell_escape_empty() {
+        assert_eq!(super::shell_escape_single_quotes(""), "");
+    }
+
+    #[test]
+    fn test_shell_escape_only_quote() {
+        assert_eq!(super::shell_escape_single_quotes("'"), "'\\''");
+    }
+
+    #[test]
+    fn test_shell_escape_code_output() {
+        let code = r#"function foo() { console.log('hello'); }"#;
+        let escaped = super::shell_escape_single_quotes(code);
+        assert_eq!(escaped, r#"function foo() { console.log('\''hello'\''); }"#);
+        // Verify escaping works by checking the pattern
+        assert!(escaped.contains("'\\''"));
+    }
+
+    #[test]
+    fn test_shell_escape_preserves_double_quotes() {
+        assert_eq!(
+            super::shell_escape_single_quotes(r#"echo "hello""#),
+            r#"echo "hello""#
+        );
+    }
+
+    #[test]
+    fn test_shell_escape_in_command_template() {
+        let mut ctx = TemplateContext::new();
+        // Simulate a prompt that contains code with single quotes
+        let raw_prompt = "Review: console.log('test')";
+        let escaped_prompt = super::shell_escape_single_quotes(raw_prompt);
+        ctx.set("prompt", escaped_prompt);
+
+        let template = "claude -p '{{prompt}}'";
+        let result = ctx.render(template).unwrap();
+        // The rendered command should be valid shell
+        assert_eq!(result, "claude -p 'Review: console.log('\\''test'\\'')'");
     }
 }
