@@ -8,13 +8,14 @@ AI coding agent loop orchestrator with intelligent verification.
 
 ## Overview
 
-**unpossible-ralph** (or just `ralph`) solves the trust and automation gap when running AI coding agents in loops. It orchestrates a development agent, uses a configurable review agent to verify work, and automatically routes to the next task or retry based on `RESULT: CONTINUE|REPEAT|DONE` signals.
+**unpossible-ralph** (or just `ralph`) solves the trust and automation gap when running AI coding agents in loops. It orchestrates a development agent, uses a review agent to verify work quality, and an independent done agent to confirm project completion.
 
 ### Key Features
 
 - **Configurable Agents**: Use any CLI-based AI agent (Claude, GPT, local models)
-- **Intelligent Verification**: Review agent evaluates work and determines next steps
-- **Automatic Routing**: CONTINUE to next task, REPEAT on failure, DONE when complete
+- **Quality Verification**: Review agent evaluates work quality (`RESULT: CONTINUE|REPEAT`)
+- **Independent Completion Check**: Done agent confirms completion by examining the filesystem, with no access to other agents' context
+- **Automatic Routing**: CONTINUE to next task, REPEAT on failure, DONE when verified complete
 - **Retry Management**: Configurable retry limits prevent infinite loops
 - **Template Variables**: Dynamic prompt generation with context from previous iterations
 
@@ -64,7 +65,7 @@ Iteration: {{iteration_count}}, Retries: {{retry_count}}
 """
 
 review = """
-Review the following work output.
+Review the following work output for quality.
 
 ## Development Agent Output
 {{dev_response}}
@@ -73,9 +74,8 @@ Review the following work output.
 {{dev_errors}}
 
 Respond with:
-- RESULT: CONTINUE if work is complete and ready for next task
+- RESULT: CONTINUE if work quality is acceptable
 - RESULT: REPEAT if work needs to be redone
-- RESULT: DONE if all work is complete
 """
 
 next_action = """
@@ -88,10 +88,19 @@ Generate the next prompt based on the completed work.
 {{review_response}}
 """
 
+done = """
+Check if all requirements in TASK.md are satisfied by examining the source code.
+
+Respond with:
+- DONE: YES if all requirements are satisfied
+- DONE: NO if more work is needed
+"""
+
 [agents]
 dev = "claude -p '{{prompt}}'"
 review = { command = "claude -p '{{prompt}}'", timeout = 600 }
 next_action = "claude -p '{{prompt}}'"
+done = "claude -p '{{prompt}}'"
 ```
 
 2. Run ralph:
@@ -125,6 +134,8 @@ ralph --config /path/to/config.toml
 | `{{iteration_count}}` | All prompts | Current iteration (1-indexed) |
 | `{{retry_count}}` | All prompts | Consecutive failures |
 
+**Note:** The done agent prompt intentionally cannot use `{{dev_response}}`, `{{dev_errors}}`, `{{review_response}}`, or `{{review_errors}}`. This ensures the done agent independently verifies completion by examining the filesystem rather than relying on other agents' output.
+
 ### Agent Configuration
 
 Agents can be configured as simple strings or extended tables:
@@ -137,11 +148,21 @@ dev = "claude -p '{{prompt}}'"
 review = { command = "claude -p '{{prompt}}'", timeout = 600 }
 ```
 
+**Required agents:** `dev`, `review`, `next_action`, `done`
+
+### Agent Signals
+
+| Agent | Signal | Values | Purpose |
+|-------|--------|--------|---------|
+| Dev | `DEV_DONE: YES` | YES only | Claims work is complete |
+| Review | `RESULT:` | CONTINUE, REPEAT | Quality assessment |
+| Done | `DONE:` | YES, NO | Completion verification |
+
 ## Exit Codes
 
 | Code | Name | Description |
 |------|------|-------------|
-| 0 | Success | `RESULT: DONE` or max_iterations reached |
+| 0 | Success | Done agent confirms `DONE: YES` or max_iterations reached |
 | 1 | Error | Configuration error, command not found, agent failure |
 | 2 | Max Retries | Retry limit exceeded |
 | 130 | Interrupted | SIGINT (Ctrl+C) |
@@ -155,30 +176,50 @@ review = { command = "claude -p '{{prompt}}'", timeout = 600 }
                     +--------+---------+
                              |
                     +--------v---------+
-           +------->|   Dev Agent      |
-           |        +--------+---------+
-           |                 |
-           |        +--------v---------+
-           |        |  Review Agent    |
-           |        +--------+---------+
-           |                 |
-           |        +--------v---------+
-           |        |  Parse RESULT    |
-           |        +--------+---------+
-           |                 |
-     +-----+-----+-----------+-----------+
-     |           |                       |
-+----v----+ +----v----+            +-----v-----+
-| REPEAT  | |CONTINUE |            |   DONE    |
-| retry++ | | retry=0 |            | exit(0)   |
-+---------+ +----+----+            +-----------+
-                 |
-        +--------v---------+
-        | Next-Action Agent|
-        +--------+---------+
-                 |
-                 v
-           (next iteration)
+           +------->|   Dev Agent      |<----+
+           |        | (may output      |     |
+           |        |  DEV_DONE: YES)  |     |
+           |        +--------+---------+     |
+           |                 |               |
+           |        +--------v---------+     |
+           |        |  Review Agent    |     |
+           |        | RESULT: CONTINUE |     |
+           |        |    or REPEAT     |     |
+           |        +--------+---------+     |
+           |                 |               |
+           |        +--------v---------+     |
+           |        |  Parse RESULT    |     |
+           |        +--------+---------+     |
+           |                 |               |
+           |     +-----------+-----------+   |
+           |     |                       |   |
+      +----v-----v----+            +-----v---+
+      |    REPEAT     |            | CONTINUE|
+      |    retry++    |            +---------+
+      +---------------+                  |
+                               +---------v---------+
+                               | Dev claimed done? |
+                               +---------+---------+
+                                    |         |
+                                   YES        NO
+                                    |         |
+                          +---------v----+    |
+                          | Done Agent   |    |
+                          | DONE: YES/NO |    |
+                          +------+-------+    |
+                                 |            |
+                          +------v------+     |
+                          | Parse DONE  |     |
+                          +------+------+     |
+                                 |            |
+                     +-----------+----+       |
+                     |                |       |
+                +----v----+     +-----v-------v----+
+                |  DONE   |     | Next-Action Agent|
+                | exit(0) |     +--------+---------+
+                +---------+              |
+                                         v
+                                   (next iteration)
 ```
 
 ## Development
